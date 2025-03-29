@@ -1,0 +1,266 @@
+import os
+import urllib.request
+import urllib.parse
+import csv
+import json
+import datetime
+import matplotlib.pyplot as plt
+import numpy as np
+import console
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+
+fmp_key = "i5nShJm6WKlPcM5h5iKlSaTY0ThnH8xA"
+
+def fetch_chart_from_fmp(symbol, save_path):
+    try:
+        url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}?apikey={fmp_key}"
+        response = urllib.request.urlopen(url)
+        data = json.load(response)
+        historical = data.get("historical", [])
+        if not historical:
+            return False
+        dates = [datetime.datetime.strptime(item['date'], '%Y-%m-%d') for item in historical[-130:]]
+        closes = [item['close'] for item in historical[-130:]]
+        plt.figure(figsize=(8, 3))
+        plt.plot(dates, closes, linewidth=2)
+        plt.title(f"{symbol} - FMP Daily Close")
+        plt.xlabel("Date")
+        plt.ylabel("Price ($)")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        return True
+    except:
+        return False
+
+def fetch_chart_from_stooq(symbol, save_path):
+    try:
+        url = f"https://stooq.com/q/d/l/?s={symbol.lower()}.us&i=d"
+        response = urllib.request.urlopen(url)
+        lines = [l.decode('utf-8') for l in response.readlines()]
+        reader = csv.DictReader(lines)
+        dates, closes = [], []
+        for row in reader:
+            try:
+                dates.append(datetime.datetime.strptime(row['Date'], "%Y-%m-%d"))
+                closes.append(float(row['Close']))
+            except:
+                continue
+        if not dates:
+            return False
+        plt.figure(figsize=(8, 3))
+        plt.plot(dates[-130:], closes[-130:], linewidth=2)
+        plt.title(f"{symbol} - Stooq Daily Close")
+        plt.xlabel("Date")
+        plt.ylabel("Price ($)")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        return True
+    except:
+        return False
+
+def fetch_chart_from_yahoo(symbol, save_path):
+    try:
+        end = int(datetime.datetime.now().timestamp())
+        start = int((datetime.datetime.now() - datetime.timedelta(days=180)).timestamp())
+        url = f"https://query1.finance.yahoo.com/v7/finance/download/{symbol}?period1={start}&period2={end}&interval=1d&events=history"
+        response = urllib.request.urlopen(url)
+        lines = [l.decode('utf-8') for l in response.readlines()]
+        reader = csv.DictReader(lines)
+        dates, closes = [], []
+        for row in reader:
+            try:
+                dates.append(datetime.datetime.strptime(row['Date'], "%Y-%m-%d"))
+                closes.append(float(row['Close']))
+            except:
+                continue
+        if not dates:
+            return False
+        plt.figure(figsize=(8, 3))
+        plt.plot(dates[-130:], closes[-130:], linewidth=2)
+        plt.title(f"{symbol} - Yahoo Daily Close")
+        plt.xlabel("Date")
+        plt.ylabel("Price ($)")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        return True
+    except:
+        return False
+
+def generate_simulated_chart(symbol, current_price, save_path):
+    days = 60
+    dates = [datetime.datetime.today() - datetime.timedelta(days=i) for i in range(days)][::-1]
+    prices = current_price + np.cumsum(np.random.normal(0, 0.5, size=days))
+    plt.figure(figsize=(8, 3))
+    plt.plot(dates, prices, linewidth=2)
+    plt.title(f"{symbol} - Simulated Chart")
+    plt.xlabel("Date")
+    plt.ylabel("Price ($)")
+    plt.grid(True)
+    plt.text(0.5, 0.05, "Simulated chart", fontsize=10, color="red", alpha=0.6, ha='center', transform=plt.gcf().transFigure)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
+def generate_pnl_chart(current_price, short_call, long_call, premium, save_path, live_trade):
+    max_profit = premium * 100
+    max_loss = ((long_call - short_call) - premium) * 100
+    target_profit = 0.5 * max_profit
+    breakeven = short_call + premium
+    x = np.linspace(current_price * 0.8, current_price * 1.2, 1000)
+    y = np.where(
+        x <= short_call, max_profit,
+        np.where(x >= long_call, -max_loss,
+                 max_profit - (x - short_call) * 100)
+    )
+    plt.figure(figsize=(8, 3))
+    plt.plot(x, y, color="black", linewidth=2)
+    plt.axhline(max_profit, color="green", linestyle=(0, (4, 2)), linewidth=2.5, label=f"Max Profit ${int(max_profit)}")
+    plt.axhline(-max_loss, color="red", linestyle=(0, (4, 2)), linewidth=2.5, label=f"Max Loss ${int(max_loss)}")
+    plt.axhline(target_profit, color="gray", linestyle=(0, (4, 2)), linewidth=2.5, label=f"Target Profit ${int(target_profit)}")
+    plt.axvline(breakeven, color="orange", linestyle=(0, (4, 2)), linewidth=2.5, label=f"Breakeven ${int(breakeven)}")
+    plt.axvline(current_price, color="blue", linestyle=(0, (4, 2)), linewidth=2.5, label=f"Current Price ${int(current_price)}")
+    plt.fill_between(x, y, 0, where=(y > 0), color='green', alpha=0.2)
+    plt.fill_between(x, y, 0, where=(y < 0), color='red', alpha=0.2)
+    if live_trade:
+        plt.text(0.95, 0.95, "LIVE TRADE", fontsize=12, color="red", ha='right', va='top', transform=plt.gca().transAxes)
+    plt.title("P&L at Expiration")
+    plt.xlabel("Stock Price at Expiration")
+    plt.ylabel("Profit / Loss")
+    plt.legend(fontsize=7)
+    plt.text(0.02, 0.66, f"Breakeven = ${breakeven:.2f}", transform=plt.gca().transAxes, fontsize=10, color="black", weight="bold")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
+def create_report():
+    stock = input("Enter stock symbol: ").upper()
+    current_price = float(input("Enter current price: $"))
+    while True:
+        short_call = float(input("Enter short call strike: $"))
+        if short_call <= current_price:
+            print("❌ Must be above current price")
+        else:
+            break
+    while True:
+        long_call = float(input("Enter long call strike: $"))
+        if long_call > short_call * 2:
+            confirm = input("⚠️ Long call is more than 100% above short. Proceed? (y/n): ")
+            if confirm.lower() == 'y':
+                break
+        else:
+            break
+    while True:
+        try:
+            expiration = input("Enter expiration date (dd/mm/yy): ")
+            expiration_date = datetime.datetime.strptime(expiration, "%d/%m/%y")
+            break
+        except:
+            print("Invalid date format.")
+    premium = float(input("Enter premium received: $"))
+    contract_size = int(input("Enter contract size: "))
+    while True:
+        try:
+            delta = float(input("Enter Delta (e.g., -0.30): "))
+            if -1.0 <= delta <= 1.0:
+                break
+            else:
+                print("❌ Delta must be between -1.0 and 1.0")
+        except:
+            print("❌ Invalid input for Delta")
+    while True:
+        live = input("Is this a live trade? (y/n): ").strip().lower()
+        if live in ['y', 'n']:
+            live_trade = live == 'y'
+            break
+        else:
+            print("❌ Please enter 'y' or 'n'")
+
+    today_str = datetime.datetime.today().strftime('%d-%m-%y')
+    folder = os.path.expanduser("~/Documents/Downloads")
+    os.makedirs(folder, exist_ok=True)
+    stock_chart_path = os.path.join(folder, "stock_chart.png")
+    pnl_chart_path = os.path.join(folder, "pnl_chart.png")
+
+    max_profit = premium * 100
+    max_loss = ((long_call - short_call) - premium) * 100
+    target_profit = 0.5 * max_profit
+    breakeven = short_call + premium
+    rr_inverse = f"{int(max_loss // max_profit)}:1" if max_profit else "N/A"
+
+    used_simulated = False
+    if not fetch_chart_from_fmp(stock, stock_chart_path):
+        if not fetch_chart_from_stooq(stock, stock_chart_path):
+            if not fetch_chart_from_yahoo(stock, stock_chart_path):
+                generate_simulated_chart(stock, current_price, stock_chart_path)
+                used_simulated = True
+
+    generate_pnl_chart(current_price, short_call, long_call, premium, pnl_chart_path, live_trade)
+
+    pdf_path = os.path.join(folder, f"Bear_Call_Spread_Report_{stock}_{today_str}.pdf")
+    c = canvas.Canvas(pdf_path, pagesize=A4)
+    width, height = A4
+    c.setFont("Helvetica-Bold", 18)
+    c.drawCentredString(width / 2, height - 40, f"{stock} Bear Call Spread Report")
+    c.setFont("Helvetica", 11)
+    c.drawCentredString(width / 2, height - 60, f"Generated on {today_str} | Current Price: ${current_price:.2f}")
+
+    # 3-column x 4-row table without borders
+    c.setFont("Helvetica", 10)
+    table_top = height - 100
+    col_width = (width - 2 * inch) / 3
+    row_height = 20
+    data = [
+        ("Stock", stock),
+        ("Current Price", f"${current_price:.2f}"),
+        ("Short Call", f"${short_call}"),
+        ("Long Call", f"${long_call}"),
+        ("Expiration", expiration_date.strftime('%d/%m/%Y')),
+        ("Premium Received", f"${premium:.2f}"),
+        ("Contract Size", str(contract_size)),
+        ("Delta", f"{delta:.2f}"),
+        ("Target Profit (50%)", f"${int(target_profit)}"),
+        ("Max Loss", f"${int(max_loss)}"),
+        ("Risk-Reward Ratio (Inverse)", rr_inverse),
+        ("Live Trade", "Yes" if live_trade else "No")
+    ]
+    for col in range(3):
+        for row in range(4):
+            i = col * 4 + row
+            label, value = data[i]
+            x = inch + col * col_width
+            y = table_top - row * row_height
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(x + 4, y - 6, label + ":")
+            c.setFont("Helvetica", 11)
+            c.drawRightString(x + col_width - 4, y - 6, value)
+
+    image_y = table_top - 4 * row_height - 40
+    c.drawImage(pnl_chart_path, inch, image_y - 200, width=6.0 * inch, height=2.8 * inch)
+    c.drawImage(stock_chart_path, inch, image_y - 480, width=6.0 * inch, height=2.8 * inch)
+
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawRightString(width - inch, 10, f"Generated on {today_str}")
+    c.showPage()
+    c.save()
+
+    os.remove(pnl_chart_path)
+    os.remove(stock_chart_path)
+    print(f"✅ Report saved to: {pdf_path}")
+    if used_simulated:
+        print("⚠️ Used simulated chart")
+    try:
+        console.open_in(pdf_path)
+    except Exception as e:
+        print("❌ Could not open share sheet", e)
+
+create_report()
